@@ -1,0 +1,46 @@
+# =============================
+# Python
+# =============================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.ipynb_checkpoints/
+
+# =============================
+# Virtual Environment
+# =============================
+venv/
+.env/
+.env.bak/
+
+# =============================
+# OS system files
+# =============================
+.DS_Store
+Thumbs.db
+
+# =============================
+# PyTorch / Training Artifacts
+# =============================
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# =============================
+# Logs and outputs
+# =============================
+logs/
+runs/
+outputs/
+results/
+*.log
+
+# =============================
+# Dataset (you DO NOT want this on GitHub)
+# =============================
+data/
+dataset/
+datasets/
+images/
