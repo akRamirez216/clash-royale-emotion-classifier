@@ -1,0 +1,34 @@
+Initial rapid learning, but then starts significantly overfitting starting around like epoch 25
+
+
+Increase regularization because: Overfitting means your model is too complex for your data. You already have some regularization, but let's strengthen it
+
+Increase Dropout Rate: Your current dropout is 0.5 applied only before the final fully connected layer. While $0.5$ is standard, you can experiment with increasing the dropout rate slightly, perhaps to p = 0.6 or p = 0.7
+
+Tweak Weight Decay from 1e-4 to 1e-3 to strongly penalize large weights
+
+For a small 48x48 grayscale image dataset (FER dataset), this might be too deep [2,2,2,2]. Switch to [2,2,1,1]
+
+
+
+Increase Rotation/Crop: Since emotion is less sensitive to exact spatial location than object recognition, you could safely increase the rotational or scaling jitter:
+
+transforms.RandomRotation(degrees=25) (up from 15)
+
+transforms.RandomResizedCrop(size=48, scale=(0.7, 1.0)) (more aggressive cropping) from scale=(0.8,1.0)
+
+
+Change to this:
+
+ transforms.RandomAffine(
+            degrees=25,  # Max rotation angle (you can increase this, e.g., 25)
+            translate=(0.1, 0.1) # Max horizontal and vertical translation (10%)
+        ),
+
+from transforms.RandomRotation(degrees=15),  # <-- This will be replaced/modified
+
+
+LR too high, from 5e-4 to 3e-4
+
+Tighter Early Stopping: Your patience is 7 epochs, but based on your loss curve, the model starts degrading much earlier.Lower Patience: Set patience to 3 or 4. This is critical for preventing the validation loss from climbing too high.
+

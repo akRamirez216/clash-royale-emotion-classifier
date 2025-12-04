@@ -1,0 +1,1 @@
+Model had solid results, maybe I  can try increasing the number of epochs to decrease the training loss further

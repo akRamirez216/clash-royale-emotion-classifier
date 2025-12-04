@@ -1,0 +1,5 @@
+Device: cuda
+Epochs: 300
+Batch Size: 64
+Learning Rate: 0.0005
+Best Val Accuracy: 69.16%
