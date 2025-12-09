@@ -1,12 +1,3 @@
-"""
-Project: Clash Royale Emotion Classifier
-File: image_classifier_preprocessing.py
-Description: Downloads the FER emotion dataset and prepares PyTorch DataLoaders.
-
-Authors: Asher Kelly, Zai Yang
-Date: June 2024
-"""
-
 import kagglehub
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
@@ -15,33 +6,26 @@ from torch.utils.data import DataLoader
 # Download dataset
 path = kagglehub.dataset_download("ananthu017/emotion-detection-fer")
 
-# -----------------------
-# TRAIN TRANSFORMS (with augmentation)
-# -----------------------
 train_transform = transforms.Compose([
     transforms.Grayscale(num_output_channels=1),
     transforms.Resize((48, 48)),
     transforms.RandomHorizontalFlip(p=0.5),
 
     transforms.RandomAffine(
-            degrees=25,  # Max rotation angle (you can increase this, e.g., 25)
-            translate=(0.1, 0.1) # Max horizontal and vertical translation (10%)
-        ),
+    degrees=15,
+    translate=(0.05, 0.05),
+    scale=(0.9, 1.05)
+    ),
 
-    transforms.RandomResizedCrop(size=48, scale=(0.7, 1.0)),
-    transforms.ColorJitter(brightness=0.2, contrast=0.2),
     transforms.ToTensor(),
-    transforms.Normalize((0.5,), (0.5,))
+    transforms.Normalize((0.485,), (0.229,))
 ])
 
-# -----------------------
-# TEST / VAL TRANSFORMS (NO AUGMENTATION)
-# -----------------------
 test_transform = transforms.Compose([
     transforms.Grayscale(num_output_channels=1),
     transforms.Resize((48, 48)),
     transforms.ToTensor(),
-    transforms.Normalize((0.5,), (0.5,))
+    transforms.Normalize((0.485,), (0.229,))
 ])
 
 

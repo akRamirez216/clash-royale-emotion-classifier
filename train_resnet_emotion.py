@@ -1,178 +1,185 @@
-"""
-aiFinalProject_transfer_fixed.py
-Clean transfer-learning training script for 48x48 grayscale FER dataset
-Uses pretrained ResNet-18 (ImageNet) adapted for 1-channel small inputs.
-Saves plots, confusion matrix, results JSON, summary, and best model in results/.
-"""
-
-import os
-import json
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
-import torchvision.models as models
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from image_classifier_preproccessing import get_dataloaders   # ensure filename matches exactly
+from image_classifier_preproccessing import get_dataloaders
+import os
+import json
+
+RESULTS_DIR = "results"
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
+print("Torch version:", torch.__version__)
+print("CUDA available:", torch.cuda.is_available())
+
+if torch.cuda.is_available():
+    print("GPU name:", torch.cuda.get_device_name(0))
+    print("# of GPUs:", torch.cuda.device_count())
+
 
 # -----------------------
 # CONFIG
 # -----------------------
-RESULTS_DIR = "results"
-os.makedirs(RESULTS_DIR, exist_ok=True)
-
 NUM_CLASSES = 7
 BATCH_SIZE = 64
-EPOCHS = 30
-LR = 1e-4               # initial LR for head training
-WEIGHT_DECAY = 5e-4
-PATIENCE = 7            # early stopping patience
-UNFREEZE_EPOCH = 10     # when to unfreeze backbone
-FINE_TUNE_LR = 1e-5     # LR for fine-tuning
+EPOCHS = 25
+LR = 0.001
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-AMP_ENABLED = torch.cuda.is_available()
-
-print("\nTorch:", torch.__version__)
-print("CUDA available:", torch.cuda.is_available())
-if torch.cuda.is_available():
-    print("GPU name:", torch.cuda.get_device_name(0))
-    print("# GPUs:", torch.cuda.device_count())
-
-# Grad scaler (AMP) enabled only on CUDA
-scaler = torch.cuda.amp.GradScaler(enabled=AMP_ENABLED)
 
 # -----------------------
 # LOAD DATA
 # -----------------------
 train_loader, val_loader, class_names = get_dataloaders(
     batch_size=BATCH_SIZE,
-    num_workers=4
+    num_workers=2
 )
 
-print("\nClasses:", class_names)
+print("Classes:", class_names)
 print("Using device:", DEVICE)
 print("Train batches:", len(train_loader))
 print("Val batches:", len(val_loader))
 
-# -----------------------
-# Build pretrained ResNet18 adapted for 1-channel small inputs
-# -----------------------
-def build_adapted_resnet18(num_classes):
-    # load weights object (modern torchvision)
-    weights = models.ResNet18_Weights.IMAGENET1K_V1
-    pretrained = models.resnet18(weights=weights)
-
-    # create new conv1 compatible with 1 channel and smaller kernel
-    # We'll use kernel_size=3, stride=1, padding=1 and remove the initial maxpool
-    new_conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
-
-    # initialize new_conv1 from pretrained conv1 by taking center 3x3 of 7x7 and averaging input channels
-    with torch.no_grad():
-        old_w = pretrained.conv1.weight.data  # shape (64,3,7,7)
-        # take center 3x3 slice
-        center = old_w[:, :, 2:5, 2:5]        # shape (64,3,3,3)
-        # average across the 3 input channels to produce shape (64,1,3,3)
-        center_mean = center.mean(dim=1, keepdim=True)
-        # if new_conv1.kernel_size == (3,3), we can copy center_mean
-        new_conv1.weight.data.copy_(center_mean)
-
-    # replace conv1 and maxpool
-    pretrained.conv1 = new_conv1
-    pretrained.maxpool = nn.Identity()  # avoid aggressive downsampling for 48x48
-
-    # Replace the final fully connected head
-    num_ftrs = pretrained.fc.in_features
-    pretrained.fc = nn.Sequential(
-        nn.Dropout(p=0.5),
-        nn.Linear(num_ftrs, num_classes)
-    )
-
-    return pretrained
-
-model = build_adapted_resnet18(NUM_CLASSES).to(DEVICE)
 
 # -----------------------
-# Freeze backbone initially (train head only)
+# BASIC RESIDUAL BLOCK
 # -----------------------
-for name, param in model.named_parameters():
-    if "fc" not in name and "bn" not in name:
-        param.requires_grad = False
+class BasicBlock(nn.Module):
+    expansion = 1
+
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(BasicBlock, self).__init__()
+
+        self.conv1 = nn.Conv2d(
+            in_channels, out_channels,
+            kernel_size=3, stride=stride,
+            padding=1, bias=False
+        )
+        self.bn1 = nn.BatchNorm2d(out_channels)
+
+        self.conv2 = nn.Conv2d(
+            out_channels, out_channels,
+            kernel_size=3, stride=1,
+            padding=1, bias=False
+        )
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(
+                    in_channels, out_channels,
+                    kernel_size=1, stride=stride,
+                    bias=False
+                ),
+                nn.BatchNorm2d(out_channels)
+            )
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(x)
+        out = F.relu(out)
+        return out
+
 
 # -----------------------
-# Loss / optimizer / scheduler (initial)
+# RESNET MODEL
 # -----------------------
-criterion = nn.CrossEntropyLoss()
+class ResNet(nn.Module):
+    def __init__(self, block, num_blocks, num_classes=7):
+        super(ResNet, self).__init__()
+        self.in_channels = 32
 
-optimizer = optim.AdamW(
-    filter(lambda p: p.requires_grad, model.parameters()),
-    lr=LR,
-    weight_decay=WEIGHT_DECAY
-)
+        self.conv1 = nn.Conv2d(
+            1, 32,
+            kernel_size=3, stride=1,
+            padding=1, bias=False
+        )
+        self.bn1 = nn.BatchNorm2d(32)
 
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-    optimizer,
-    mode="max",
-    factor=0.5,
-    patience=3
-)
+        self.layer1 = self._make_layer(block, 32,  num_blocks[0], stride=1)
+        self.layer2 = self._make_layer(block, 64,  num_blocks[1], stride=2)
+        self.layer3 = self._make_layer(block, 128, num_blocks[2], stride=2)
+        self.layer4 = self._make_layer(block, 256, num_blocks[3], stride=2)
+
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(256, num_classes)
+
+    def _make_layer(self, block, out_channels, num_blocks, stride):
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+
+        for stride in strides:
+            layers.append(block(self.in_channels, out_channels, stride))
+            self.in_channels = out_channels
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.layer1(out)
+        out = self.layer2(out)
+        out = self.layer3(out)
+        out = self.layer4(out)
+
+        out = self.avgpool(out)
+        out = torch.flatten(out, 1)
+        out = self.fc(out)
+
+        return out
+
+
+def ResNet18_emotion(num_classes=7):
+    return ResNet(BasicBlock, [2, 2, 2, 2], num_classes)
+
 
 # -----------------------
-# Training / validation functions
+# TRAIN / VALIDATE FUNCTIONS
 # -----------------------
 def train_one_epoch(model, loader, optimizer, criterion):
     model.train()
-    running_loss = 0.0
+    total_loss = 0
     correct = 0
     total = 0
 
     for images, labels in loader:
-        images = images.to(DEVICE)
-        labels = labels.to(DEVICE)
+        images, labels = images.to(DEVICE), labels.to(DEVICE)
 
         optimizer.zero_grad()
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
 
-        with torch.cuda.amp.autocast(enabled=AMP_ENABLED):
-            outputs = model(images)
-            loss = criterion(outputs, labels)
-
-        # backward + step with scaler if AMP
-        if AMP_ENABLED:
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            loss.backward()
-            optimizer.step()
-
-        running_loss += loss.item() * images.size(0)
+        total_loss += loss.item() * images.size(0)
         _, preds = torch.max(outputs, 1)
         correct += (preds == labels).sum().item()
         total += labels.size(0)
 
-    epoch_loss = running_loss / total
-    epoch_acc = 100.0 * correct / total
-    return epoch_loss, epoch_acc
+    return total_loss / total, 100 * correct / total
 
 
 def validate_one_epoch(model, loader, criterion):
     model.eval()
-    running_loss = 0.0
+    total_loss = 0
     correct = 0
     total = 0
+
     all_preds = []
     all_labels = []
 
     with torch.no_grad():
         for images, labels in loader:
-            images = images.to(DEVICE)
-            labels = labels.to(DEVICE)
-
+            images, labels = images.to(DEVICE), labels.to(DEVICE)
             outputs = model(images)
-            loss = criterion(outputs, labels)
 
-            running_loss += loss.item() * images.size(0)
+            loss = criterion(outputs, labels)
+            total_loss += loss.item() * images.size(0)
+
             _, preds = torch.max(outputs, 1)
 
             all_preds.extend(preds.cpu().numpy())
@@ -181,33 +188,37 @@ def validate_one_epoch(model, loader, criterion):
             correct += (preds == labels).sum().item()
             total += labels.size(0)
 
-    epoch_loss = running_loss / total
-    epoch_acc = 100.0 * correct / total
-    return epoch_loss, epoch_acc, all_labels, all_preds
+    return total_loss / total, 100 * correct / total, all_labels, all_preds
+
 
 # -----------------------
-# MAIN TRAIN LOOP
+# MAIN
 # -----------------------
 def main():
-    global optimizer, scheduler, model
+
+    model = ResNet18_emotion(NUM_CLASSES).to(DEVICE)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=LR)
 
     train_losses, val_losses = [], []
     train_accs, val_accs = [], []
 
-    best_val = 0.0
-    patience_count = 0
-    unfrozen = False
-
     final_labels = None
     final_preds = None
 
+    best_val_acc = 0.0
+    best_model_path = f"{RESULTS_DIR}/best_emotion_resnet18.pth"
+
     for epoch in range(EPOCHS):
-        train_loss, train_acc = train_one_epoch(model, train_loader, optimizer, criterion)
-        val_loss, val_acc, labels, preds = validate_one_epoch(model, val_loader, criterion)
+        train_loss, train_acc = train_one_epoch(
+            model, train_loader, optimizer, criterion
+        )
 
-        # Step scheduler on validation accuracy (we set mode="max")
-        scheduler.step(val_acc)
+        val_loss, val_acc, labels, preds = validate_one_epoch(
+            model, val_loader, criterion
+        )
 
+        # Save final epoch predictions for confusion matrix
         final_labels = labels
         final_preds = preds
 
@@ -216,31 +227,16 @@ def main():
         train_accs.append(train_acc)
         val_accs.append(val_acc)
 
-        # Unfreeze & switch optimizer once (fine-tune whole network)
-        if (epoch + 1) == UNFREEZE_EPOCH and not unfrozen:
-            print("\n🔓 Unfreezing all layers for fine-tuning...")
-            for param in model.parameters():
-                param.requires_grad = True
-
-            optimizer = optim.AdamW(model.parameters(), lr=FINE_TUNE_LR, weight_decay=WEIGHT_DECAY)
-            scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=3)
-            unfrozen = True
-
         print(f"\nEpoch {epoch+1}/{EPOCHS}")
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
         print(f" Val  Loss: {val_loss:.4f} | Val  Acc: {val_acc:.2f}%")
 
-        # Save best model by validation accuracy
-        if val_acc > best_val + 1e-4:
-            best_val = val_acc
-            patience_count = 0
-            torch.save(model.state_dict(), f"{RESULTS_DIR}/best_transfer_resnet18.pth")
-            print(f"  --> New best model saved (val_acc={best_val:.2f}%)")
-        else:
-            patience_count += 1
-            if patience_count >= PATIENCE:
-                print(f"\nNo improvement for {PATIENCE} epochs. Early stopping.")
-                break
+        # Save best model
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), best_model_path)
+            print(f"🔥 Best model updated (epoch {epoch+1}) | Val Acc: {val_acc:.2f}%")
+
 
     # -----------------------
     # PLOTS
@@ -267,44 +263,63 @@ def main():
     plt.savefig(f"{RESULTS_DIR}/accuracy_curve.png")
     plt.show()
 
+
     # -----------------------
     # CONFUSION MATRIX
     # -----------------------
-    cm = confusion_matrix(final_labels, final_preds, labels=list(range(NUM_CLASSES)))
+    cm = confusion_matrix(
+        final_labels,
+        final_preds,
+        labels=list(range(NUM_CLASSES))   # force full 7x7
+    )
 
     plt.figure(figsize=(8, 8))
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
+    disp = ConfusionMatrixDisplay(
+        confusion_matrix=cm,
+        display_labels=class_names
+    )
     disp.plot(xticks_rotation=45)
     plt.title("Confusion Matrix")
     plt.tight_layout()
     plt.savefig(f"{RESULTS_DIR}/confusion_matrix.png")
     plt.show()
 
+
     # -----------------------
-    # SAVE FINAL RESULTS
+    # SAVE RESULTS
     # -----------------------
     results = {
         "train_losses": train_losses,
         "val_losses": val_losses,
         "train_accs": train_accs,
         "val_accs": val_accs,
-        "best_val_acc": best_val,
         "classes": class_names,
         "confusion_matrix": cm.tolist()
     }
 
-    with open(f"{RESULTS_DIR}/training_results_transfer.json", "w") as f:
+    with open(f"{RESULTS_DIR}/training_results.json", "w") as f:
         json.dump(results, f, indent=4)
 
-    with open(f"{RESULTS_DIR}/summary_transfer.txt", "w") as f:
+
+    with open(f"{RESULTS_DIR}/summary.txt", "w") as f:
         f.write(f"Device: {DEVICE}\n")
         f.write(f"Epochs: {EPOCHS}\n")
         f.write(f"Batch Size: {BATCH_SIZE}\n")
         f.write(f"Learning Rate: {LR}\n")
-        f.write(f"Best Val Accuracy: {best_val:.2f}%\n")
+        f.write(f"Final Train Accuracy: {train_accs[-1]:.2f}%\n")
+        f.write(f"Final Val Accuracy: {val_accs[-1]:.2f}%\n")
 
-    print("\n✅ Training Complete")
-    print(f"✅ Best model saved: {RESULTS_DIR}/best_transfer_resnet18.pth")
+
+    # -----------------------
+    # SAVE MODEL
+    # -----------------------
+    torch.save(model.state_dict(), f"{RESULTS_DIR}/emotion_resnet18_final.pth")
+
+
+    print(f"\n✅ Model saved as {RESULTS_DIR}/emotion_resnet18_final.pth")
+    print(f"✅ Confusion Matrix saved as {RESULTS_DIR}/confusion_matrix.png")
+    print(f"✅ Results saved as training_results.json and summary.txt")
+
 
 if __name__ == "__main__":
     main()
