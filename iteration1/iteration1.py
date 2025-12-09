@@ -206,6 +206,9 @@ def main():
     final_labels = None
     final_preds = None
 
+    best_val_acc = 0.0
+    best_model_path = f"{RESULTS_DIR}/best_emotion_resnet18.pth"
+
     for epoch in range(EPOCHS):
         train_loss, train_acc = train_one_epoch(
             model, train_loader, optimizer, criterion
@@ -227,6 +230,12 @@ def main():
         print(f"\nEpoch {epoch+1}/{EPOCHS}")
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
         print(f" Val  Loss: {val_loss:.4f} | Val  Acc: {val_acc:.2f}%")
+
+        # Save best model
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), best_model_path)
+            print(f"🔥 Best model updated (epoch {epoch+1}) | Val Acc: {val_acc:.2f}%")
 
 
     # -----------------------
@@ -304,12 +313,10 @@ def main():
     # -----------------------
     # SAVE MODEL
     # -----------------------
-    torch.save(
-        model.state_dict(),
-        f"{RESULTS_DIR}/emotion_resnet18.pth"
-    )
+    torch.save(model.state_dict(), f"{RESULTS_DIR}/emotion_resnet18_final.pth")
 
-    print(f"\n✅ Model saved as {RESULTS_DIR}/emotion_resnet18.pth")
+
+    print(f"\n✅ Model saved as {RESULTS_DIR}/emotion_resnet18_final.pth")
     print(f"✅ Confusion Matrix saved as {RESULTS_DIR}/confusion_matrix.png")
     print(f"✅ Results saved as training_results.json and summary.txt")
 
