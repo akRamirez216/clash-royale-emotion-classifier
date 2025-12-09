@@ -1,7 +1,6 @@
-""""A emotion recognition project that extracts facial 
-landmarks with Mini-Xception model and classifies them based on training 
-data from the dataset. The system categorizes emotions into seven emotions, 
-triggering matching Clash Royale emotes and sounds."""
+"""
+Emotion recognition with Mini-Xception using the Kaggle FER dataset.
+"""
 
 import os
 import cv2
@@ -9,11 +8,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import kagglehub
+import tensorflow as tf
 
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, classification_report
 
-import tensorflow as tf
 from tensorflow.keras.layers import (
     Input, SeparableConv2D, BatchNormalization,
     ReLU, GlobalAveragePooling2D, Dense
@@ -22,11 +20,15 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 
 
-
 # CONSTANTS
-EMOTIONS = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
+EMOTIONS = ['angry', 'disgusted', 'fearful', 'happy', 'sad', 'surprised', 'neutral']
 DATASET_PATH = kagglehub.dataset_download("ananthu017/emotion-detection-fer")
-MODEL_SAVE_PATH = 'best_emotion_model.keras'
+
+OUTPUT_DIR = "outputs"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+MODEL_SAVE_PATH = os.path.join(OUTPUT_DIR, "best_emotion_model.keras")
+WEIGHTS_SAVE_PATH = os.path.join(OUTPUT_DIR, "best_weights.h5")
 
 IMG_SIZE = (64, 64)
 BATCH_SIZE = 32
@@ -34,10 +36,8 @@ EPOCHS = 50
 NUM_CLASSES = len(EMOTIONS)
 
 
-
 # MODEL: Mini-Xception
 def build_mini_xception(input_shape, num_classes):
-    """Builds the Mini-Xception model architecture."""
     inputs = Input(shape=input_shape)
 
     x = SeparableConv2D(8, (3, 3), padding='same')(inputs)
@@ -55,45 +55,47 @@ def build_mini_xception(input_shape, num_classes):
     x = GlobalAveragePooling2D()(x)
     outputs = Dense(num_classes, activation='softmax')(x)
 
-    model = Model(inputs, outputs)
-    return model
+    return Model(inputs, outputs)
 
 
-
-# DATA LOADING
-def load_data(dataset_path):
-    data = []
-    labels = []
-
-    for emotion in EMOTIONS:
-        emotion_dir = os.path.join(dataset_path, emotion)
-        if not os.path.isdir(emotion_dir):
-            print(f"Warning: Missing folder: {emotion_dir}")
-            continue
-
-        for filename in os.listdir(emotion_dir):
-            fpath = os.path.join(emotion_dir, filename)
-
-            img = cv2.imread(fpath, cv2.IMREAD_GRAYSCALE)
-            if img is None:
+# DATA LOADER
+def load_split_data(root_path):
+    def load_folder(folder_path):
+        data, labels = [], []
+        for idx, emotion in enumerate(EMOTIONS):
+            emotion_dir = os.path.join(folder_path, emotion.lower())
+            if not os.path.isdir(emotion_dir):
+                print(f"[WARN] Missing folder: {emotion_dir}")
                 continue
 
-            img = cv2.resize(img, IMG_SIZE)
-            img = img.astype("float32") / 255.0
+            for fname in os.listdir(emotion_dir):
+                fpath = os.path.join(emotion_dir, fname)
 
-            data.append(img)
-            labels.append(EMOTIONS.index(emotion))
+                img = cv2.imread(fpath, cv2.IMREAD_GRAYSCALE)
+                if img is None:
+                    continue
 
-    return np.array(data), np.array(labels)
+                img = cv2.resize(img, IMG_SIZE)
+                img = img.astype("float32") / 255.0
+
+                data.append(img)
+                labels.append(idx)
+
+        return np.array(data), np.array(labels)
+
+    print("Loading training set...")
+    X_train, y_train = load_folder(os.path.join(root_path, "train"))
+
+    print("Loading test set...")
+    X_test, y_test = load_folder(os.path.join(root_path, "test"))
+
+    return X_train, y_train, X_test, y_test
 
 
-
-
-# TRAINING FUNCTION
+# TRAINING
 def train_and_evaluate(model, X_train, y_train, X_test, y_test):
-    """Trains the model and evaluates it on the test set."""
 
-    # Model checkpoint to save the best model
+    # Save the best .keras model
     checkpoint = ModelCheckpoint(
         MODEL_SAVE_PATH,
         monitor="val_accuracy",
@@ -102,14 +104,12 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test):
         verbose=1
     )
 
-    # Early stopping to prevent overfitting
     early_stop = EarlyStopping(
         monitor="val_loss",
         patience=10,
         restore_best_weights=True
     )
 
-    # Train the model
     history = model.fit(
         X_train, y_train,
         batch_size=BATCH_SIZE,
@@ -118,100 +118,91 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test):
         callbacks=[checkpoint, early_stop]
     )
 
-    # Plot Accuracy 
+    # Save training plots
+    # Accuracy plot
     plt.figure(figsize=(10, 5))
     plt.plot(history.history["accuracy"], label="Train Accuracy")
     plt.plot(history.history["val_accuracy"], label="Val Accuracy")
-    plt.title("Accuracy Over Epochs")
-    plt.xlabel("Epoch")
-    plt.ylabel("Accuracy")
-    plt.legend()
-    plt.grid()
-    plt.show()
+    plt.legend(); plt.grid(); plt.title("Accuracy")
+    plt.savefig(os.path.join(OUTPUT_DIR, "accuracy_plot.png"))
+    plt.close()
 
-    # Plot Loss 
+    # Loss plot
     plt.figure(figsize=(10, 5))
     plt.plot(history.history["loss"], label="Train Loss")
     plt.plot(history.history["val_loss"], label="Val Loss")
-    plt.title("Loss Over Epochs")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.legend()
-    plt.grid()
-    plt.show()
+    plt.legend(); plt.grid(); plt.title("Loss")
+    plt.savefig(os.path.join(OUTPUT_DIR, "loss_plot.png"))
+    plt.close()
+
+    # Save weights separately
+    model.save_weights(WEIGHTS_SAVE_PATH)
 
     return history
 
 
-
-# CONFUSION MATRIX HEATMAP
-def plot_confusion_matrix(y_true, y_pred, labels):
-    """Plots the confusion matrix as a heatmap."""
-    cm = confusion_matrix(y_true, y_pred)
-
+def save_confusion_matrix(cm, labels):
     plt.figure(figsize=(10, 8))
-    sns.heatmap(
-        cm, annot=True, fmt="d",
-        xticklabels=labels,
-        yticklabels=labels,
-        cmap="Blues"
-    )
+    sns.heatmap(cm, annot=True, fmt="d",
+                xticklabels=labels, yticklabels=labels,
+                cmap="Blues")
     plt.xlabel("Predicted")
     plt.ylabel("True")
     plt.title("Confusion Matrix")
-    plt.show()
+    plt.savefig(os.path.join(OUTPUT_DIR, "confusion_matrix.png"))
+    plt.close()
 
 
+def write_summary(train_acc, val_acc):
+    summary_path = os.path.join(OUTPUT_DIR, "summary.txt")
+    with open(summary_path, "w") as f:
+        f.write(f"Device: {tf.config.list_physical_devices('GPU')}\n")
+        f.write(f"Epochs: {EPOCHS}\n")
+        f.write(f"Batch Size: {BATCH_SIZE}\n")
+        f.write(f"Learning Rate: Adam default (0.001)\n")
+        f.write(f"Final Train Accuracy: {train_acc*100:.2f}%\n")
+        f.write(f"Final Val Accuracy: {val_acc*100:.2f}%\n")
+    print("Saved summary to summary.txt")
 
-# MAIN FUNCTION
+
+# MAIN
 def main():
+    print("DATASET_PATH:", DATASET_PATH)
 
-    # Load data
-    print("Loading data...")
-    data, labels = load_data(DATASET_PATH)
+    print("Loading dataset...")
+    X_train, y_train, X_test, y_test = load_split_data(DATASET_PATH)
 
-    # Check if data is loaded
-    if len(data) == 0:
-        print("No data found. Check DATASET_PATH.")
-        return
+    # Reshape for TF/Keras
+    X_train = np.expand_dims(X_train, -1)
+    X_test = np.expand_dims(X_test, -1)
 
-    # Reshape data for model input
-    data = np.expand_dims(data, -1)
-
-    # Split dataset
-    print("Splitting dataset...")
-    X_train, X_test, y_train, y_test = train_test_split(
-        data, labels, test_size=0.2, random_state=42
-    )
-
-    # Build model  
-    print("Building model...")
+    print("Building Mini-Xception model...")
     model = build_mini_xception((IMG_SIZE[0], IMG_SIZE[1], 1), NUM_CLASSES)
-    model.compile(
-        optimizer='adam',
-        loss='sparse_categorical_crossentropy',
-        metrics=['accuracy']
-    )
+    model.compile(optimizer='adam',
+                  loss='sparse_categorical_crossentropy',
+                  metrics=['accuracy'])
 
-    # Train and evaluate model
-    print("Training...")
-    train_and_evaluate(model, X_train, y_train, X_test, y_test)
+    print("Training model...")
+    history = train_and_evaluate(model, X_train, y_train, X_test, y_test)
 
-    # Load best model for final evaluation
-    print("Loading best saved model...")
+    # Load best saved model
+    print("Loading best model from disk...")
     best_model = tf.keras.models.load_model(MODEL_SAVE_PATH)
 
-
     # Final evaluation
-    print("Evaluating best model...")
+    print("Evaluating...")
     y_pred = np.argmax(best_model.predict(X_test), axis=1)
-
     print(classification_report(y_test, y_pred, target_names=EMOTIONS))
 
-    print("Plotting confusion matrix...")
-    plot_confusion_matrix(y_test, y_pred, EMOTIONS)
+    cm = confusion_matrix(y_test, y_pred)
+    save_confusion_matrix(cm, EMOTIONS)
 
-    print("Best model saved at:", MODEL_SAVE_PATH)
+    # Save summary.txt
+    final_train_acc = history.history["accuracy"][-1]
+    final_val_acc = history.history["val_accuracy"][-1]
+    write_summary(final_train_acc, final_val_acc)
+
+    print("All outputs saved in:", OUTPUT_DIR)
 
 
 if __name__ == "__main__":

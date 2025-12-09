@@ -34,7 +34,6 @@ Thumbs.db
 logs/
 runs/
 outputs/
-results/
 *.log
 
 # =============================
