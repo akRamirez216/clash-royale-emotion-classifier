@@ -8,17 +8,13 @@ import imageio
 import pygame
 import time
 
-# -----------------------------
-# Initialize audio
-# -----------------------------
+# Initialize Audio
 try:
     pygame.mixer.init()
 except Exception as e:
     print("Warning: pygame.mixer.init() failed:", e)
 
-# -----------------------------
-# EMOTE FILE PATHS
-# -----------------------------
+# Emote File Paths
 GIF_PATHS = {
     "angry": "gifs/angry.gif",
     "disgusted": "gifs/disgusted.gif",
@@ -41,9 +37,7 @@ SOUND_PATHS = {
     "unknown": "sounds/unknown.mp3",
 }
 
-# -----------------------------
-# DEVICE SETUP
-# -----------------------------
+# Device Setup
 if torch.cuda.is_available():
     device = torch.device("cuda")
 elif torch.backends.mps.is_available():
@@ -52,9 +46,7 @@ else:
     device = torch.device("cpu")
 print("Using device:", device)
 
-# -----------------------------
-# LOAD MODEL
-# -----------------------------
+# Load Model
 MODEL_PATH = "trained_model/best_emotion_resnet18.pth"
 model = ResNet18_emotion(num_classes=7)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
@@ -63,9 +55,7 @@ model.eval()
 
 EMOTION_LABELS = ["angry", "disgusted", "fearful", "happy", "neutral", "sad", "surprised"]
 
-# -----------------------------
-# PREPROCESSING
-# -----------------------------
+# Preprocessing Function
 def preprocess(face_img):
     face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
     face_img = cv2.resize(face_img, (48, 48))
@@ -74,15 +64,11 @@ def preprocess(face_img):
     face_tensor = (face_tensor - 0.485) / 0.229
     return face_tensor.to(device)
 
-# -----------------------------
-# MEDIAPIPE FACE DETECTOR
-# -----------------------------
+# Media Pipe Face Detection Setup
 mp_face_detection = mp.solutions.face_detection
 face_detection = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
 
-# -----------------------------
-# PRELOAD GIFS
-# -----------------------------
+# Preload GIFS
 GIF_FRAMES = {}
 GIF_INDEX = {}
 GIF_LAST_TIME = {}
@@ -109,14 +95,10 @@ for emotion, path in GIF_PATHS.items():
         GIF_INDEX[emotion] = 0
         GIF_LAST_TIME[emotion] = 0.0
 
-# -----------------------------
-# EMOTE COOLDOWN (last played tracking)
-# -----------------------------
+# Emote Cooldown
 last_played = {"emotion": None, "time": 0}
 
-# -----------------------------
-# PLAY SOUND
-# -----------------------------
+# Play Sound
 def play_sound(path):
     try:
         pygame.mixer.music.stop()
@@ -125,9 +107,7 @@ def play_sound(path):
     except Exception as e:
         print(f"Failed to play sound {path}: {e}")
 
-# ==============================
-# SETTINGS
-# ==============================
+# GIF Display Settings
 GIF_DISPLAY_SIZE = (300, 300)  # Bigger GIF
 GIF_POSITION = (10, 10)        # Overlay position
 UNKNOWN_THRESHOLD = 0.20
@@ -135,9 +115,7 @@ BUFFER_SIZE = 4                 # How many past frames to consider for smoothing
 COOLDOWN = 1.0                  # Seconds before switching to a new emotion
 emotion_buffer = []
 
-# ==============================
-# MAIN LOOP
-# ==============================
+# Main Webcam Loop
 cv2.namedWindow("Emotion Recognition", cv2.WINDOW_NORMAL)
 cap = cv2.VideoCapture(0)
 print("Starting webcam... Press 'q' to quit.")
@@ -153,9 +131,7 @@ while True:
     detected_emotion = None
     detected_conf = 0.0
 
-    # ------------------------------
-    # FACE DETECTION + EMOTION PREDICTION
-    # ------------------------------
+    # Face Detection and Emotion Prediction
     if results.detections:
         det = results.detections[0]  # only first face
         bbox = det.location_data.relative_bounding_box
@@ -181,9 +157,8 @@ while True:
             cv2.putText(frame, label_text, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
             cv2.rectangle(frame, (x1, y1), (x1+w, y1+h), (0,255,0), 2)
 
-    # ------------------------------
-    # BUFFER + MAJORITY VOTE
-    # ------------------------------
+    # Buffer + majority vote: stores the last N detected emotions and chooses the most frequent one.
+    # This helps smooth out rapid fluctuations and prevents the displayed emotion from switching too quickly.
     if detected_emotion:
         emotion_buffer.append(detected_emotion)
         if len(emotion_buffer) > BUFFER_SIZE:
@@ -195,9 +170,8 @@ while True:
         most_common = last_played["emotion"]  # keep previous if no detection
 
     now = time.time()
-    # ------------------------------
-    # SWITCH EMOTION IF BUFFER AGREES AND COOLDOWN PASSED
-    # ------------------------------
+
+    # Switch emotion if buffer agrees and cooldown passed
     if most_common != last_played["emotion"] and (now - last_played["time"] > COOLDOWN):
         last_played["emotion"] = most_common
         last_played["time"] = now
@@ -212,9 +186,7 @@ while True:
             GIF_INDEX[most_common] = 0
             GIF_LAST_TIME[most_common] = now
 
-    # ------------------------------
-    # OVERLAY GIF
-    # ------------------------------
+    # Overlay GIF
     current_emotion = last_played["emotion"]
     if current_emotion and GIF_FRAMES.get(current_emotion):
         frames = GIF_FRAMES[current_emotion]

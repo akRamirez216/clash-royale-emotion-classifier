@@ -8,9 +8,7 @@ CLASSES = ["angry", "disgusted", "fearful", "happy", "neutral", "sad", "surprise
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# -----------------------------------------
-# BasicBlock  (IDENTICAL TO TRAINING)
-# -----------------------------------------
+# Basic Block for ResNet
 class BasicBlock(nn.Module):
     expansion = 1
 
@@ -50,9 +48,7 @@ class BasicBlock(nn.Module):
         return out
 
 
-# -----------------------------------------
-# ResNet18  (IDENTICAL TO TRAINING)
-# -----------------------------------------
+# ResNet Architecture
 class ResNet(nn.Module):
     def __init__(self, block, num_blocks, num_classes=7):
         super(ResNet, self).__init__()
@@ -97,9 +93,7 @@ def ResNet18_emotion(num_classes=7):
     return ResNet(BasicBlock, [2, 2, 2, 2], num_classes)
 
 
-# -----------------------------------------
-# Load Your Trained Weights
-# -----------------------------------------
+# Load Trained Weights
 def load_model(weights_path="trained_model/best_emotion_resnet18.pth"):
     model = ResNet18_emotion(num_classes=7)
     model.load_state_dict(torch.load(weights_path, map_location=DEVICE))
@@ -108,10 +102,7 @@ def load_model(weights_path="trained_model/best_emotion_resnet18.pth"):
     return model
 
 
-# -----------------------------------------
 # Predict Function
-# image_tensor: (1,48,48) already normalized
-# -----------------------------------------
 def predict_emotion(model, image_tensor, unknown_threshold=0.40):
     """
     Returns (label, confidence).

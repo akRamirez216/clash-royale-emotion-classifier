@@ -20,9 +20,7 @@ if torch.cuda.is_available():
     print("# of GPUs:", torch.cuda.device_count())
 
 
-# -----------------------
-# CONFIG
-# -----------------------
+# Config
 NUM_CLASSES = 7
 BATCH_SIZE = 64
 EPOCHS = 25
@@ -30,9 +28,7 @@ LR = 0.001
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# -----------------------
-# LOAD DATA
-# -----------------------
+# Load Data
 train_loader, val_loader, class_names = get_dataloaders(
     batch_size=BATCH_SIZE,
     num_workers=2
@@ -44,9 +40,7 @@ print("Train batches:", len(train_loader))
 print("Val batches:", len(val_loader))
 
 
-# -----------------------
-# BASIC RESIDUAL BLOCK
-# -----------------------
+# Basic Residual Block
 class BasicBlock(nn.Module):
     expansion = 1
 
@@ -86,9 +80,7 @@ class BasicBlock(nn.Module):
         return out
 
 
-# -----------------------
-# RESNET MODEL
-# -----------------------
+# Resnet Model
 class ResNet(nn.Module):
     def __init__(self, block, num_blocks, num_classes=7):
         super(ResNet, self).__init__()
@@ -137,9 +129,7 @@ def ResNet18_emotion(num_classes=7):
     return ResNet(BasicBlock, [2, 2, 2, 2], num_classes)
 
 
-# -----------------------
-# TRAIN / VALIDATE FUNCTIONS
-# -----------------------
+# Train / Validate Functions
 def train_one_epoch(model, loader, optimizer, criterion):
     model.train()
     total_loss = 0
@@ -191,9 +181,7 @@ def validate_one_epoch(model, loader, criterion):
     return total_loss / total, 100 * correct / total, all_labels, all_preds
 
 
-# -----------------------
-# MAIN
-# -----------------------
+# Main
 def main():
 
     model = ResNet18_emotion(NUM_CLASSES).to(DEVICE)
@@ -238,9 +226,7 @@ def main():
             print(f"🔥 Best model updated (epoch {epoch+1}) | Val Acc: {val_acc:.2f}%")
 
 
-    # -----------------------
-    # PLOTS
-    # -----------------------
+    # Plots
     plt.figure()
     plt.plot(train_losses, label="Train Loss")
     plt.plot(val_losses, label="Validation Loss")
@@ -264,9 +250,7 @@ def main():
     plt.show()
 
 
-    # -----------------------
-    # CONFUSION MATRIX
-    # -----------------------
+    # Confusion Matrix
     cm = confusion_matrix(
         final_labels,
         final_preds,
@@ -285,9 +269,7 @@ def main():
     plt.show()
 
 
-    # -----------------------
-    # SAVE RESULTS
-    # -----------------------
+    # Save Results
     results = {
         "train_losses": train_losses,
         "val_losses": val_losses,
@@ -310,9 +292,7 @@ def main():
         f.write(f"Final Val Accuracy: {val_accs[-1]:.2f}%\n")
 
 
-    # -----------------------
-    # SAVE MODEL
-    # -----------------------
+    # Save Model
     torch.save(model.state_dict(), f"{RESULTS_DIR}/emotion_resnet18_final.pth")
 
 
