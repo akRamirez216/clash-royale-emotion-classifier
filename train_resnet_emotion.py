@@ -1,3 +1,10 @@
+"""
+This script trains a ResNet18 model for emotion detection using the FER dataset.
+
+Authors: Asher Kelly, Zai Yang
+Date: December 13, 2025
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -45,8 +52,18 @@ class BasicBlock(nn.Module):
     expansion = 1
 
     def __init__(self, in_channels, out_channels, stride=1):
+        """
+        Docstring for __init__
+        
+        :param self: self
+        :param in_channels: Specifies the number of input channels.
+        :param out_channels: Specifies the number of output channels.
+        :param stride: Describes the stride of the convolution. Default is 1.
+        :return: None
+        """
         super(BasicBlock, self).__init__()
 
+        # First convolutional layer
         self.conv1 = nn.Conv2d(
             in_channels, out_channels,
             kernel_size=3, stride=stride,
@@ -54,6 +71,7 @@ class BasicBlock(nn.Module):
         )
         self.bn1 = nn.BatchNorm2d(out_channels)
 
+        # Second convolutional layer
         self.conv2 = nn.Conv2d(
             out_channels, out_channels,
             kernel_size=3, stride=1,
@@ -61,6 +79,7 @@ class BasicBlock(nn.Module):
         )
         self.bn2 = nn.BatchNorm2d(out_channels)
 
+        # Shortcut connection
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
@@ -72,7 +91,15 @@ class BasicBlock(nn.Module):
                 nn.BatchNorm2d(out_channels)
             )
 
+    # Forward pass
     def forward(self, x):
+        """
+        Docstring for forward
+
+        :param self: self
+        :param x: Input tensor
+        :return: Output tensor after passing through the block
+        """
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         out += self.shortcut(x)
@@ -83,9 +110,19 @@ class BasicBlock(nn.Module):
 # Resnet Model
 class ResNet(nn.Module):
     def __init__(self, block, num_blocks, num_classes=7):
+        """
+        Docstring for __init__
+        
+        :param self: self
+        :param block: Specifies the block type to be used in the ResNet architecture.
+        :param num_blocks: Specifies the number of blocks in each layer of the ResNet.
+        :param num_classes: Specifies the number of output classes for classification. Default is 7.
+        :return: None
+        """
         super(ResNet, self).__init__()
         self.in_channels = 32
 
+        # Initial convolutional layer
         self.conv1 = nn.Conv2d(
             1, 32,
             kernel_size=3, stride=1,
@@ -93,25 +130,48 @@ class ResNet(nn.Module):
         )
         self.bn1 = nn.BatchNorm2d(32)
 
+        # Residual layers
         self.layer1 = self._make_layer(block, 32,  num_blocks[0], stride=1)
         self.layer2 = self._make_layer(block, 64,  num_blocks[1], stride=2)
         self.layer3 = self._make_layer(block, 128, num_blocks[2], stride=2)
         self.layer4 = self._make_layer(block, 256, num_blocks[3], stride=2)
 
+        # Fully connected layer
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(256, num_classes)
 
+    # Create layers
     def _make_layer(self, block, out_channels, num_blocks, stride):
+        """
+        Docstring for _make_layer
+        Creates a sequential layer consisting of multiple residual blocks.
+
+        :param self: self
+        :param block: Specifies the block type to be used.
+        :param out_channels: Specifies the number of output channels for the blocks.
+        :param num_blocks: Specifies the number of blocks to create in the layer.
+        :param stride: Describes the stride of the first block in the layer.
+        :return: A sequential layer containing the specified number of blocks.
+        """
         strides = [stride] + [1] * (num_blocks - 1)
         layers = []
 
+        # Build each block
         for stride in strides:
             layers.append(block(self.in_channels, out_channels, stride))
             self.in_channels = out_channels
 
         return nn.Sequential(*layers)
 
+    # Forward pass
     def forward(self, x):
+        """
+        Docstring for forward
+        
+        :param self: self
+        :param x: Input tensor
+        :return: Output tensor after passing through the ResNet model
+        """
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
@@ -123,19 +183,36 @@ class ResNet(nn.Module):
         out = self.fc(out)
 
         return out
+    
 
-
+# ResNet18 for Emotion Detection
 def ResNet18_emotion(num_classes=7):
+    """
+    Docstring for ResNet18_emotion
+    
+    :param num_classes: Specifies the number of output classes for classification. Default is 7.
+    :return: An instance of the ResNet model configured as ResNet18.
+    """
     return ResNet(BasicBlock, [2, 2, 2, 2], num_classes)
 
 
 # Train / Validate Functions
 def train_one_epoch(model, loader, optimizer, criterion):
+    """
+    Docstring for train_one_epoch
+    
+    :param model: model to be trained
+    :param loader: data loader
+    :param optimizer: optimizer for training
+    :param criterion: Defines the loss function to be used during training.
+    :return: Tuple containing average loss and accuracy for the epoch.
+    """
     model.train()
     total_loss = 0
     correct = 0
     total = 0
 
+    # Training loop
     for images, labels in loader:
         images, labels = images.to(DEVICE), labels.to(DEVICE)
 
@@ -153,7 +230,16 @@ def train_one_epoch(model, loader, optimizer, criterion):
     return total_loss / total, 100 * correct / total
 
 
+# Validate Function
 def validate_one_epoch(model, loader, criterion):
+    """
+    Docstring for validate_one_epoch
+    
+    :param model: model to be validated
+    :param loader: data loader
+    :param criterion: Defines the loss function to be used during validation.
+    :return: Tuple containing average loss, accuracy, true labels, and predicted labels for the epoch.
+    """
     model.eval()
     total_loss = 0
     correct = 0
@@ -162,6 +248,7 @@ def validate_one_epoch(model, loader, criterion):
     all_preds = []
     all_labels = []
 
+    # Validation loop
     with torch.no_grad():
         for images, labels in loader:
             images, labels = images.to(DEVICE), labels.to(DEVICE)
@@ -183,7 +270,11 @@ def validate_one_epoch(model, loader, criterion):
 
 # Main
 def main():
+    """
+    Docstring for main
+    """
 
+    # Initialize model, criterion, optimizer
     model = ResNet18_emotion(NUM_CLASSES).to(DEVICE)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=LR)
@@ -197,6 +288,7 @@ def main():
     best_val_acc = 0.0
     best_model_path = f"{RESULTS_DIR}/best_emotion_resnet18.pth"
 
+    # Training loop
     for epoch in range(EPOCHS):
         train_loss, train_acc = train_one_epoch(
             model, train_loader, optimizer, criterion

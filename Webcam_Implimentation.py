@@ -1,3 +1,11 @@
+"""
+This script captures webcam input, detects faces using MediaPipe, classifies emotions using a trained ResNet18 model,
+and overlays corresponding GIFs and plays sounds based on detected emotions.
+
+Authors: Asher Kelly, Zai Yang
+Date: December 13, 2025
+"""
+
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -75,6 +83,7 @@ GIF_LAST_TIME = {}
 GIF_DELAY = 0.06  # ~16 FPS
 GIF_DISPLAY_SIZE = (240, 240)
 
+# Load GIFs
 for emotion, path in GIF_PATHS.items():
     try:
         gif = imageio.mimread(path)
